@@ -22,12 +22,22 @@ async def fetch_expenses_by_month(month_name: str):
 # POST /expenses - Add a new expense
 @router.post("/expenses")
 async def add_expense(expense: Expense):
+    # Use provided date (YYYY-MM-DD) or default to today
+    if expense.date:
+        try:
+            parsed = datetime.strptime(expense.date, "%Y-%m-%d")
+            date_str = parsed.strftime("%d %B %Y")
+        except ValueError:
+            date_str = datetime.now().strftime("%d %B %Y")
+    else:
+        date_str = datetime.now().strftime("%d %B %Y")
+
     expense_dict = {
         "title": expense.title,
         "amount": expense.amount,
         "category": expense.category,
         "currency": expense.currency,
-        "date": datetime.now().strftime("%d %B %Y")
+        "date": date_str
     }
 
     result = await expense_collection.insert_one(expense_dict)

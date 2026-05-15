@@ -7,12 +7,19 @@ class Expense(BaseModel):
     amount: float
     category: str
     currency: str
+    date: Optional[str] = None  # ISO format YYYY-MM-DD, defaults to today
 
 
 class SmartExpense(BaseModel):
     title: str
     amount: float
     currency: str = "INR"
+    date: Optional[str] = None  # ISO format YYYY-MM-DD, defaults to today
+
+
+class NaturalExpense(BaseModel):
+    text: str
+    date: Optional[str] = None  # ISO format YYYY-MM-DD, defaults to today
 
 
 class Salary(BaseModel):

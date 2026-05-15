@@ -12,6 +12,7 @@ from ai.prompts import (
     ADVICE_PROMPT,
     CATEGORIZE_PROMPT,
     CHAT_SYSTEM_PROMPT,
+    PARSE_EXPENSE_PROMPT,
 )
 from ai.tools import TOOL_FUNCTIONS, TOOL_SCHEMAS
 
@@ -55,6 +56,40 @@ def generate_budget_advice(summary_data: dict, salary):
         "salary": salary,
     }, indent=2)
     return _ask_groq(ADVICE_PROMPT, user_msg, max_tokens=500)
+
+
+def parse_expense_text(text: str) -> dict:
+    """Parse a free-form sentence into {title, amount, category}.
+
+    Returns dict with those 3 keys, or raises ValueError if parsing fails.
+    """
+    valid_cats = {"Food", "Transport", "Shopping", "Bills",
+                  "Entertainment", "Health", "Education", "Miscellaneous"}
+    raw = _ask_groq(PARSE_EXPENSE_PROMPT, text, max_tokens=250)
+
+    # Strip code fences if model adds them anyway
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"AI returned invalid JSON: {raw}") from e
+
+    title = (parsed.get("title") or "").strip()
+    amount = parsed.get("amount")
+    category = (parsed.get("category") or "Miscellaneous").strip()
+
+    if not title or amount is None:
+        raise ValueError(f"AI missed title or amount: {parsed}")
+
+    if category not in valid_cats:
+        category = "Miscellaneous"
+
+    return {"title": title, "amount": float(amount), "category": category}
 
 
 def categorize_expense(title: str) -> str:

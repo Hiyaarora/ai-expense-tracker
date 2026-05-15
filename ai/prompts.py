@@ -18,6 +18,30 @@ Each tip should:
 
 Format: Return a numbered list (1., 2., 3.) with one tip per line. No markdown bold/italic."""
 
+PARSE_EXPENSE_PROMPT = """You are an expense parser.
+Given a single sentence describing an expense in plain English, extract:
+- title: short description (the item / merchant), 2-4 words
+- amount: numeric value only (no currency symbol)
+- category: one of Food, Transport, Shopping, Bills, Entertainment, Health, Education, Miscellaneous
+
+Return ONLY a valid JSON object with EXACTLY these 3 keys.
+No markdown. No code fence. No explanation. Just JSON.
+
+Examples:
+Input: "I spent 1000 rs on food with title zomato"
+Output: {"title": "Zomato", "amount": 1000, "category": "Food"}
+
+Input: "paid 500 for uber yesterday"
+Output: {"title": "Uber", "amount": 500, "category": "Transport"}
+
+Input: "bought a t-shirt from myntra for 1200"
+Output: {"title": "Myntra t-shirt", "amount": 1200, "category": "Shopping"}
+
+Input: "350 electricity bill"
+Output: {"title": "Electricity bill", "amount": 350, "category": "Bills"}
+"""
+
+
 CATEGORIZE_PROMPT = """You are an expense categorizer.
 Given an expense title, return the SINGLE most likely category from this exact list:
 Food, Transport, Shopping, Bills, Entertainment, Health, Education, Miscellaneous

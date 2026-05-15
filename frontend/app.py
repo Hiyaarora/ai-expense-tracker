@@ -1,6 +1,7 @@
 """Streamlit Dashboard — main entry page."""
+from datetime import date
 import streamlit as st
-from api_client import get, post, delete
+from api_client import get, post, put, delete
 
 st.set_page_config(page_title="AI Expense Tracker", page_icon="💰", layout="wide")
 
@@ -23,12 +24,27 @@ with col_sal_a:
         st.error(f"Could not load salary: {e}")
 
 with col_sal_b:
-    with st.form("salary_form", clear_on_submit=True):
-        sal_amt = st.number_input("Add to this month's salary",
-                                  min_value=0.0, step=1000.0)
-        if st.form_submit_button("Save"):
-            post("/salary", {"amount": sal_amt, "currency": "INR"})
-            st.rerun()
+    sal_tab1, sal_tab2 = st.tabs(["✏️ Set / Edit", "➕ Add to existing"])
+
+    with sal_tab1:
+        st.caption("Replaces the current salary with the value below.")
+        with st.form("salary_set_form", clear_on_submit=True):
+            set_amt = st.number_input("Set salary to (₹)",
+                                      min_value=0.0, step=1000.0,
+                                      key="set_salary_amt")
+            if st.form_submit_button("Save (Replace)"):
+                put("/salary", {"amount": set_amt, "currency": "INR"})
+                st.rerun()
+
+    with sal_tab2:
+        st.caption("Adds the amount below to existing salary (for raises / bonuses).")
+        with st.form("salary_add_form", clear_on_submit=True):
+            add_amt = st.number_input("Add to salary (₹)",
+                                      min_value=0.0, step=1000.0,
+                                      key="add_salary_amt")
+            if st.form_submit_button("Add"):
+                post("/salary", {"amount": add_amt, "currency": "INR"})
+                st.rerun()
 
 # ============================ Savings ============================
 st.subheader("📈 This Month at a Glance")
@@ -50,15 +66,50 @@ st.divider()
 # ============================ Add Expense ============================
 st.subheader("➕ Add an Expense")
 
-tab1, tab2 = st.tabs(["✨ Smart Add (AI picks category)", "Manual Add"])
+tab_nl, tab_smart, tab_manual = st.tabs([
+    "🪄 Natural Language (Most AI)",
+    "✨ Smart Add (AI picks category)",
+    "Manual Add",
+])
 
-with tab1:
-    st.caption("Just type the title and amount — Llama figures out the category.")
+# -------- Natural Language Tab --------
+with tab_nl:
+    st.caption(
+        "Type a full sentence — AI extracts title, amount, AND category. "
+        "Example: _\"I spent 1000 rs on food at zomato\"_"
+    )
+    with st.form("nl_form", clear_on_submit=True):
+        nl_text = st.text_input(
+            "Describe the expense in one line",
+            placeholder='e.g. "Paid 350 for uber to office"',
+        )
+        nl_date = st.date_input("Date", value=date.today(), key="nl_date")
+        if st.form_submit_button("Parse & Add with AI"):
+            if nl_text.strip():
+                with st.spinner("🤖 AI is parsing your sentence..."):
+                    try:
+                        result = post("/expenses/natural", {
+                            "text": nl_text,
+                            "date": nl_date.isoformat(),
+                        })
+                        exp = result["expense"]
+                        st.success(
+                            f"Added **{exp['title']}** • ₹{exp['amount']:,.0f} • "
+                            f"**{exp['category']}** • {exp['date']}"
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Could not parse: {e}")
+
+# -------- Smart Add Tab --------
+with tab_smart:
+    st.caption("Type the title and amount — Llama figures out the category.")
     with st.form("smart_form", clear_on_submit=True):
         s_title = st.text_input("What did you spend on?",
                                 placeholder="e.g. Zomato dinner, Uber to airport")
         s_amount = st.number_input("Amount (₹)", min_value=0.0, step=50.0,
                                    key="smart_amount")
+        s_date = st.date_input("Date", value=date.today(), key="smart_date")
         smart_submit = st.form_submit_button("Add with AI")
         if smart_submit and s_title and s_amount > 0:
             with st.spinner("🤖 AI is picking a category..."):
@@ -66,13 +117,15 @@ with tab1:
                     "title": s_title,
                     "amount": s_amount,
                     "currency": "INR",
+                    "date": s_date.isoformat(),
                 })
             st.success(
                 f"Added under **{result['expense']['category']}** category!"
             )
             st.rerun()
 
-with tab2:
+# -------- Manual Add Tab --------
+with tab_manual:
     with st.form("manual_form", clear_on_submit=True):
         m_title = st.text_input("Title", key="manual_title")
         m_amount = st.number_input("Amount (₹)", min_value=0.0, step=50.0,
@@ -81,12 +134,14 @@ with tab2:
             "Food", "Transport", "Shopping", "Bills",
             "Entertainment", "Health", "Education", "Miscellaneous"
         ])
+        m_date = st.date_input("Date", value=date.today(), key="manual_date")
         if st.form_submit_button("Add"):
             post("/expenses", {
                 "title": m_title,
                 "amount": m_amount,
                 "category": m_category,
                 "currency": "INR",
+                "date": m_date.isoformat(),
             })
             st.rerun()
 
