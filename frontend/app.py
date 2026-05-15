@@ -66,9 +66,8 @@ st.divider()
 # ============================ Add Expense ============================
 st.subheader("➕ Add an Expense")
 
-tab_nl, tab_smart, tab_manual = st.tabs([
-    "🪄 Natural Language (Most AI)",
-    "✨ Smart Add (AI picks category)",
+tab_nl, tab_manual = st.tabs([
+    "🪄 Natural Language (AI)",
     "Manual Add",
 ])
 
@@ -100,29 +99,6 @@ with tab_nl:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Could not parse: {e}")
-
-# -------- Smart Add Tab --------
-with tab_smart:
-    st.caption("Type the title and amount — Llama figures out the category.")
-    with st.form("smart_form", clear_on_submit=True):
-        s_title = st.text_input("What did you spend on?",
-                                placeholder="e.g. Zomato dinner, Uber to airport")
-        s_amount = st.number_input("Amount (₹)", min_value=0.0, step=50.0,
-                                   key="smart_amount")
-        s_date = st.date_input("Date", value=date.today(), key="smart_date")
-        smart_submit = st.form_submit_button("Add with AI")
-        if smart_submit and s_title and s_amount > 0:
-            with st.spinner("🤖 AI is picking a category..."):
-                result = post("/expenses/smart", {
-                    "title": s_title,
-                    "amount": s_amount,
-                    "currency": "INR",
-                    "date": s_date.isoformat(),
-                })
-            st.success(
-                f"Added under **{result['expense']['category']}** category!"
-            )
-            st.rerun()
 
 # -------- Manual Add Tab --------
 with tab_manual:
