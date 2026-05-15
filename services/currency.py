@@ -89,6 +89,25 @@ def get_rate(from_currency: str, to_currency: str) -> float:
         )
 
 
+def build_amount_fields(amount: float, input_currency: str, base_currency: str) -> dict:
+    """Build the amount-related fields for an expense doc.
+
+    If input and base currencies match: just amount + currency.
+    If different: converts and also stores original amount + rate for transparency.
+    """
+    if input_currency == base_currency:
+        return {"amount": float(amount), "currency": base_currency}
+
+    conv = convert(amount, input_currency, base_currency)
+    return {
+        "amount": conv["converted_amount"],
+        "currency": base_currency,
+        "original_amount": conv["original_amount"],
+        "original_currency": conv["original_currency"],
+        "exchange_rate": conv["exchange_rate"],
+    }
+
+
 def convert(amount: float, from_currency: str, to_currency: str) -> dict:
     """Convert an amount from one currency to another.
 

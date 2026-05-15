@@ -5,7 +5,8 @@ from datetime import datetime
 
 from database import expense_collection, salary_collection
 from models import SmartExpense, NaturalExpense, ChatRequest
-from routes.expenses import fetch_expenses_by_month
+from routes.expenses import fetch_expenses_by_month, get_base_currency
+from services.currency import build_amount_fields
 from ai.llm_client import (
     generate_monthly_insights,
     generate_budget_advice,
@@ -86,12 +87,15 @@ async def smart_add_expense(expense: SmartExpense):
     """Add an expense with AI-picked category based on the title."""
     category = categorize_expense(expense.title)
     date_str = _resolve_date(expense.date)
+    base_currency = await get_base_currency()
+    amount_fields = build_amount_fields(
+        expense.amount, expense.currency.upper(), base_currency
+    )
     doc = {
         "title": expense.title,
-        "amount": expense.amount,
         "category": category,
-        "currency": expense.currency,
         "date": date_str,
+        **amount_fields,
     }
     result = await expense_collection.insert_one(doc)
     return {
@@ -99,10 +103,9 @@ async def smart_add_expense(expense: SmartExpense):
         "expense": {
             "id": str(result.inserted_id),
             "title": expense.title,
-            "amount": expense.amount,
             "category": category,
-            "currency": expense.currency,
             "date": date_str,
+            **amount_fields,
         },
     }
 
@@ -119,12 +122,17 @@ async def natural_add_expense(nl: NaturalExpense):
         raise HTTPException(status_code=400, detail=f"Could not parse: {e}")
 
     date_str = _resolve_date(nl.date)
+    base_currency = await get_base_currency()
+    input_currency = (nl.currency or base_currency).upper()
+    amount_fields = build_amount_fields(
+        parsed["amount"], input_currency, base_currency
+    )
+
     doc = {
         "title": parsed["title"],
-        "amount": parsed["amount"],
         "category": parsed["category"],
-        "currency": "INR",
         "date": date_str,
+        **amount_fields,
     }
     result = await expense_collection.insert_one(doc)
     return {
@@ -132,10 +140,9 @@ async def natural_add_expense(nl: NaturalExpense):
         "expense": {
             "id": str(result.inserted_id),
             "title": doc["title"],
-            "amount": doc["amount"],
             "category": doc["category"],
-            "currency": doc["currency"],
             "date": doc["date"],
+            **amount_fields,
         },
     }
 

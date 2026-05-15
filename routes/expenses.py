@@ -1,10 +1,17 @@
 from fastapi import APIRouter, HTTPException
-from database import expense_collection
+from database import expense_collection, settings_collection
 from models import Expense, UpdateExpense
 from datetime import datetime
 from bson import ObjectId
+from services.currency import build_amount_fields
 
 router = APIRouter()
+
+
+async def get_base_currency() -> str:
+    """Fetch the user's configured base currency (defaults to INR)."""
+    s = await settings_collection.find_one({"_id": "user_settings"})
+    return (s or {}).get("base_currency", "INR")
 
 # ✅ HELPER FUNCTION - reusable by any route
 async def fetch_expenses_by_month(month_name: str):
@@ -32,12 +39,16 @@ async def add_expense(expense: Expense):
     else:
         date_str = datetime.now().strftime("%d %B %Y")
 
+    base_currency = await get_base_currency()
+    amount_fields = build_amount_fields(
+        expense.amount, expense.currency.upper(), base_currency
+    )
+
     expense_dict = {
         "title": expense.title,
-        "amount": expense.amount,
         "category": expense.category,
-        "currency": expense.currency,
-        "date": date_str
+        "date": date_str,
+        **amount_fields,
     }
 
     result = await expense_collection.insert_one(expense_dict)
@@ -47,10 +58,9 @@ async def add_expense(expense: Expense):
         "expense": {
             "id": str(result.inserted_id),
             "title": expense.title,
-            "amount": expense.amount,
             "category": expense.category,
-            "currency": expense.currency,
-            "date": expense_dict["date"]
+            "date": expense_dict["date"],
+            **amount_fields,
         }
     }
 

@@ -20,6 +20,7 @@ class SmartExpense(BaseModel):
 class NaturalExpense(BaseModel):
     text: str
     date: Optional[str] = None  # ISO format YYYY-MM-DD, defaults to today
+    currency: Optional[str] = None  # Input currency code, defaults to base
 
 
 class Salary(BaseModel):
