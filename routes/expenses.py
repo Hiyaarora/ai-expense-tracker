@@ -152,17 +152,26 @@ async def update_expense(expense_id: str, expense: UpdateExpense):
         )
 
 
-# GET /expenses/summary/monthly - Category-wise totals for current month
+# GET /expenses/summary/monthly - Category-wise totals
+# Optional ?month=May&year=2026 to view a specific month (defaults to current)
 @router.get("/expenses/summary/monthly")
-async def get_monthly_summary():
-    current_month_name = datetime.now().strftime("%B")
-    current_month_year = datetime.now().strftime("%B-%Y")
+async def get_monthly_summary(month: str = None, year: int = None):
+    if month and year:
+        target_month_name = month
+        target_month_year = f"{month}-{year}"
+    else:
+        target_month_name = datetime.now().strftime("%B")
+        target_month_year = datetime.now().strftime("%B-%Y")
 
-    expenses = await fetch_expenses_by_month(current_month_name)
+    expenses = await fetch_expenses_by_month(target_month_name)
+
+    # If a specific year was requested, also filter by year in the date string
+    if year:
+        expenses = [e for e in expenses if str(year) in str(e.get("date", ""))]
 
     if not expenses:
         return {
-            "month": current_month_year,
+            "month": target_month_year,
             "summary": {},
             "total": 0,
             "message": "No expenses found for this month"
@@ -179,7 +188,7 @@ async def get_monthly_summary():
         total += amount
 
     return {
-        "month": current_month_year,
+        "month": target_month_year,
         "currency": currency,
         "summary": summary,
         "total": total,
