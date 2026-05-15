@@ -40,10 +40,15 @@ with col_b:
     new_code = codes[options.index(new_choice)]
 
     if new_code != current_base:
-        if st.button(f"Set base currency to {new_code}",
+        if st.button(f"Convert everything to {new_code}",
                      type="primary", use_container_width=True):
-            result = put("/settings", {"base_currency": new_code})
-            st.success(f"✅ {result['message']}")
+            with st.spinner(f"Converting all data to {new_code}..."):
+                result = put("/settings", {"base_currency": new_code})
+            st.success(result["message"])
+            st.info(
+                f"Rate used: 1 {result['old_base_currency']} = "
+                f"{result['conversion_rate']} {result['base_currency']}"
+            )
             st.rerun()
     else:
         st.info("Pick a different currency above to change it.")
