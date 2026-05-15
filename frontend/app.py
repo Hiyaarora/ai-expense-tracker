@@ -125,19 +125,85 @@ st.divider()
 
 # ============================ Recent Expenses ============================
 st.subheader("📋 This Month's Expenses")
+
+# Track which expense is currently being edited
+if "editing_id" not in st.session_state:
+    st.session_state.editing_id = None
+
+CATEGORIES = ["Food", "Transport", "Shopping", "Bills",
+              "Entertainment", "Health", "Education", "Miscellaneous"]
+
 try:
     data = get("/expenses")
     if "expenses" in data and data["expenses"]:
         st.caption(f"Showing {data['total_count']} expense(s)")
-        # Display with delete buttons
         for expense in data["expenses"]:
-            cols = st.columns([3, 1, 2, 1])
+            is_editing = st.session_state.editing_id == expense["id"]
+
+            # ----- Row layout: title | amount | category | edit | delete -----
+            cols = st.columns([3, 1, 2, 0.6, 0.6])
             cols[0].write(f"**{expense['title']}**")
             cols[1].write(f"₹{expense['amount']:,.0f}")
             cols[2].write(f"_{expense['category']}_")
-            if cols[3].button("🗑", key=f"del_{expense['id']}"):
-                delete(f"/expenses/{expense['id']}")
+
+            if cols[3].button("✏️", key=f"edit_{expense['id']}",
+                              help="Edit this expense"):
+                st.session_state.editing_id = (
+                    None if is_editing else expense["id"]
+                )
                 st.rerun()
+
+            if cols[4].button("🗑", key=f"del_{expense['id']}",
+                              help="Delete this expense"):
+                delete(f"/expenses/{expense['id']}")
+                if is_editing:
+                    st.session_state.editing_id = None
+                st.rerun()
+
+            # ----- Inline edit form (shown when this row is being edited) -----
+            if is_editing:
+                with st.container(border=True):
+                    st.markdown("**✏️ Editing expense**")
+                    with st.form(f"edit_form_{expense['id']}",
+                                 clear_on_submit=False):
+                        new_title = st.text_input(
+                            "Title", value=expense["title"],
+                            key=f"e_title_{expense['id']}",
+                        )
+                        new_amount = st.number_input(
+                            "Amount (₹)",
+                            value=float(expense["amount"]),
+                            min_value=0.0, step=50.0,
+                            key=f"e_amt_{expense['id']}",
+                        )
+                        current_cat = expense.get("category", "Miscellaneous")
+                        if current_cat not in CATEGORIES:
+                            current_cat = "Miscellaneous"
+                        new_category = st.selectbox(
+                            "Category", CATEGORIES,
+                            index=CATEGORIES.index(current_cat),
+                            key=f"e_cat_{expense['id']}",
+                        )
+
+                        save_col, cancel_col = st.columns([1, 1])
+                        save_clicked = save_col.form_submit_button(
+                            "💾 Save", use_container_width=True
+                        )
+                        cancel_clicked = cancel_col.form_submit_button(
+                            "❌ Cancel", use_container_width=True
+                        )
+
+                        if save_clicked:
+                            put(f"/expenses/{expense['id']}", {
+                                "title": new_title,
+                                "amount": new_amount,
+                                "category": new_category,
+                            })
+                            st.session_state.editing_id = None
+                            st.rerun()
+                        elif cancel_clicked:
+                            st.session_state.editing_id = None
+                            st.rerun()
     else:
         st.info("No expenses recorded this month yet. Add one above! 👆")
 except Exception as e:
