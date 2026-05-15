@@ -43,24 +43,65 @@ with col_sal_a:
 with col_sal_b:
     sal_tab1, sal_tab2 = st.tabs(["✏️ Set / Edit", "➕ Add to existing"])
 
+    _sal_idx = CURRENCY_CODES.index(BASE_CURRENCY) if BASE_CURRENCY in CURRENCY_CODES else 0
+
+    # ----- Tab 1: SET (replace) -----
     with sal_tab1:
-        st.caption("Replaces the current salary with the value below.")
+        st.caption("Replaces the salary with the value below (converted to base currency).")
         with st.form("salary_set_form", clear_on_submit=True):
-            set_amt = st.number_input(f"Set salary to ({BASE_SYMBOL})",
-                                      min_value=0.0, step=1000.0,
-                                      key="set_salary_amt")
-            if st.form_submit_button("Save (Replace)"):
-                put("/salary", {"amount": set_amt, "currency": "INR"})
+            sub_a, sub_b = st.columns([2, 1])
+            with sub_a:
+                set_amt = st.number_input(
+                    "Set salary to", min_value=0.0, step=100.0,
+                    key="set_salary_amt",
+                )
+            with sub_b:
+                set_curr_label = st.selectbox(
+                    "Currency", CURRENCY_LABELS, index=_sal_idx,
+                    key="set_salary_curr",
+                )
+            set_curr = CURRENCY_CODES[CURRENCY_LABELS.index(set_curr_label)]
+
+            if st.form_submit_button("💾 Save"):
+                result = put("/salary", {"amount": set_amt, "currency": set_curr})
+                if result.get("original_currency"):
+                    st.success(
+                        f"Set salary: {result['original_currency']} {result['original_amount']:,.2f} → "
+                        f"{BASE_SYMBOL}{result['total_salary']:,.2f} (rate {result['exchange_rate']})"
+                    )
                 st.rerun()
 
+    # ----- Tab 2: ADD to existing -----
     with sal_tab2:
-        st.caption("Adds the amount below to existing salary (for raises / bonuses).")
+        st.caption(
+            "Adds the amount below to your current salary. Great for bonuses, "
+            "side income, or salary in a different currency."
+        )
         with st.form("salary_add_form", clear_on_submit=True):
-            add_amt = st.number_input(f"Add to salary ({BASE_SYMBOL})",
-                                      min_value=0.0, step=1000.0,
-                                      key="add_salary_amt")
-            if st.form_submit_button("Add"):
-                post("/salary", {"amount": add_amt, "currency": "INR"})
+            sub_c, sub_d = st.columns([2, 1])
+            with sub_c:
+                add_amt = st.number_input(
+                    "Amount to add", min_value=0.0, step=100.0,
+                    key="add_salary_amt",
+                )
+            with sub_d:
+                add_curr_label = st.selectbox(
+                    "Currency", CURRENCY_LABELS, index=_sal_idx,
+                    key="add_salary_curr",
+                )
+            add_curr = CURRENCY_CODES[CURRENCY_LABELS.index(add_curr_label)]
+
+            if st.form_submit_button("➕ Add"):
+                result = post("/salary", {"amount": add_amt, "currency": add_curr})
+                if result.get("original_currency"):
+                    st.success(
+                        f"Added: {result['original_currency']} {result['original_amount']:,.2f} → "
+                        f"{BASE_SYMBOL}{result['added_amount']:,.2f} "
+                        f"(rate {result['exchange_rate']}). "
+                        f"New total: {BASE_SYMBOL}{result['total_salary']:,.2f}"
+                    )
+                else:
+                    st.success(f"New total salary: {BASE_SYMBOL}{result['total_salary']:,.2f}")
                 st.rerun()
 
 # ============================ Savings ============================
