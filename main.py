@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import expenses, salary, ai
+from routes import expenses, salary, ai, settings
 
 app = FastAPI(title="AI Expense Tracker API")
 
@@ -16,6 +16,7 @@ app.add_middleware(
 app.include_router(expenses.router)
 app.include_router(salary.router)
 app.include_router(ai.router)
+app.include_router(settings.router)
 
 
 @app.get("/")

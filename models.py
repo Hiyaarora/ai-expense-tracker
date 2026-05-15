@@ -42,3 +42,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
+
+
+class SettingsUpdate(BaseModel):
+    base_currency: str  # e.g. "INR", "USD", "EUR"

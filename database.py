@@ -17,3 +17,4 @@ db = client.expense_tracker
 # Collections we will use
 expense_collection = db.expenses
 salary_collection = db.salaries
+settings_collection = db.settings
