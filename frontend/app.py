@@ -3,10 +3,27 @@ from datetime import date
 import streamlit as st
 from api_client import get, post, put, delete
 
+# Load base currency once per render
+try:
+    _settings = get("/settings")
+    BASE_CURRENCY = _settings["base_currency"]
+    BASE_SYMBOL = _settings["symbol"]
+    SUPPORTED_CURRENCIES = _settings["supported_currencies"]
+except Exception:
+    BASE_CURRENCY = "INR"
+    BASE_SYMBOL = "₹"
+    SUPPORTED_CURRENCIES = [{"code": "INR", "symbol": "₹", "name": "Indian Rupee"}]
+
+CURRENCY_CODES = [c["code"] for c in SUPPORTED_CURRENCIES]
+CURRENCY_LABELS = [f"{c['symbol']} {c['code']}" for c in SUPPORTED_CURRENCIES]
+
 st.set_page_config(page_title="AI Expense Tracker", page_icon="💰", layout="wide")
 
 st.title("💰 AI Expense Tracker")
-st.caption("Powered by Llama on Groq • Use the sidebar to navigate")
+st.caption(
+    f"Powered by Llama on Groq • Base currency: **{BASE_SYMBOL} {BASE_CURRENCY}** "
+    f"(change in Settings) • Use the sidebar to navigate"
+)
 
 # ============================ Salary ============================
 st.subheader("💼 Salary")
@@ -17,7 +34,7 @@ with col_sal_a:
         salary_data = get("/salary")
         if "total_salary" in salary_data:
             st.metric("This Month's Salary",
-                      f"₹{salary_data['total_salary']:,.0f}")
+                      f"{BASE_SYMBOL}{salary_data['total_salary']:,.0f}")
         else:
             st.info("No salary recorded for this month yet.")
     except Exception as e:
@@ -29,7 +46,7 @@ with col_sal_b:
     with sal_tab1:
         st.caption("Replaces the current salary with the value below.")
         with st.form("salary_set_form", clear_on_submit=True):
-            set_amt = st.number_input("Set salary to (₹)",
+            set_amt = st.number_input(f"Set salary to ({BASE_SYMBOL})",
                                       min_value=0.0, step=1000.0,
                                       key="set_salary_amt")
             if st.form_submit_button("Save (Replace)"):
@@ -39,7 +56,7 @@ with col_sal_b:
     with sal_tab2:
         st.caption("Adds the amount below to existing salary (for raises / bonuses).")
         with st.form("salary_add_form", clear_on_submit=True):
-            add_amt = st.number_input("Add to salary (₹)",
+            add_amt = st.number_input(f"Add to salary ({BASE_SYMBOL})",
                                       min_value=0.0, step=1000.0,
                                       key="add_salary_amt")
             if st.form_submit_button("Add"):
@@ -52,9 +69,9 @@ try:
     savings = get("/savings")
     if "summary" in savings:
         c1, c2, c3 = st.columns(3)
-        c1.metric("Salary", f"₹{savings['summary']['salary']:,.0f}")
-        c2.metric("Spent", f"₹{savings['summary']['total_expenses']:,.0f}")
-        c3.metric("Savings", f"₹{savings['summary']['savings']:,.0f}")
+        c1.metric("Salary", f"{BASE_SYMBOL}{savings['summary']['salary']:,.0f}")
+        c2.metric("Spent", f"{BASE_SYMBOL}{savings['summary']['total_expenses']:,.0f}")
+        c3.metric("Savings", f"{BASE_SYMBOL}{savings['summary']['savings']:,.0f}")
         st.caption(savings.get("status", ""))
     else:
         st.info(savings.get("message", "Add salary to see savings."))
@@ -82,7 +99,18 @@ with tab_nl:
             "Describe the expense in one line",
             placeholder='e.g. "Paid 350 for uber to office"',
         )
-        nl_date = st.date_input("Date", value=date.today(), key="nl_date")
+        nl_col1, nl_col2 = st.columns([1, 1])
+        with nl_col1:
+            nl_date = st.date_input("Date", value=date.today(), key="nl_date")
+        with nl_col2:
+            _idx = CURRENCY_CODES.index(BASE_CURRENCY) if BASE_CURRENCY in CURRENCY_CODES else 0
+            nl_curr_label = st.selectbox(
+                "Currency typed in", CURRENCY_LABELS,
+                index=_idx, key="nl_curr",
+                help="Will be converted to your base currency if different.",
+            )
+        nl_currency = CURRENCY_CODES[CURRENCY_LABELS.index(nl_curr_label)]
+
         if st.form_submit_button("Parse & Add with AI"):
             if nl_text.strip():
                 with st.spinner("🤖 AI is parsing your sentence..."):
@@ -90,12 +118,15 @@ with tab_nl:
                         result = post("/expenses/natural", {
                             "text": nl_text,
                             "date": nl_date.isoformat(),
+                            "currency": nl_currency,
                         })
                         exp = result["expense"]
-                        st.success(
-                            f"Added **{exp['title']}** • ₹{exp['amount']:,.0f} • "
-                            f"**{exp['category']}** • {exp['date']}"
-                        )
+                        msg = (f"Added **{exp['title']}** • {BASE_SYMBOL}{exp['amount']:,.2f} • "
+                               f"**{exp['category']}** • {exp['date']}")
+                        if "original_currency" in exp and exp["original_currency"] != BASE_CURRENCY:
+                            msg += (f" _(from {exp['original_currency']} "
+                                    f"{exp['original_amount']:,.2f} @ rate {exp['exchange_rate']})_")
+                        st.success(msg)
                         st.rerun()
                     except Exception as e:
                         st.error(f"Could not parse: {e}")
@@ -104,21 +135,35 @@ with tab_nl:
 with tab_manual:
     with st.form("manual_form", clear_on_submit=True):
         m_title = st.text_input("Title", key="manual_title")
-        m_amount = st.number_input("Amount (₹)", min_value=0.0, step=50.0,
-                                   key="manual_amount")
+        m_col_a, m_col_b = st.columns([2, 1])
+        with m_col_a:
+            m_amount = st.number_input("Amount", min_value=0.0, step=50.0,
+                                       key="manual_amount")
+        with m_col_b:
+            _idx_m = CURRENCY_CODES.index(BASE_CURRENCY) if BASE_CURRENCY in CURRENCY_CODES else 0
+            m_curr_label = st.selectbox(
+                "Currency", CURRENCY_LABELS, index=_idx_m, key="manual_curr",
+            )
+        m_currency = CURRENCY_CODES[CURRENCY_LABELS.index(m_curr_label)]
         m_category = st.selectbox("Category", [
             "Food", "Transport", "Shopping", "Bills",
             "Entertainment", "Health", "Education", "Miscellaneous"
         ])
         m_date = st.date_input("Date", value=date.today(), key="manual_date")
         if st.form_submit_button("Add"):
-            post("/expenses", {
+            result = post("/expenses", {
                 "title": m_title,
                 "amount": m_amount,
                 "category": m_category,
-                "currency": "INR",
+                "currency": m_currency,
                 "date": m_date.isoformat(),
             })
+            exp = result.get("expense", {})
+            if "original_currency" in exp and exp["original_currency"] != BASE_CURRENCY:
+                st.success(
+                    f"Converted {exp['original_currency']} {exp['original_amount']:,.2f} → "
+                    f"{BASE_SYMBOL}{exp['amount']:,.2f} (rate {exp['exchange_rate']})"
+                )
             st.rerun()
 
 st.divider()
@@ -143,7 +188,7 @@ try:
             # ----- Row layout: title | amount | category | edit | delete -----
             cols = st.columns([3, 1, 2, 0.6, 0.6])
             cols[0].write(f"**{expense['title']}**")
-            cols[1].write(f"₹{expense['amount']:,.0f}")
+            cols[1].write(f"{BASE_SYMBOL}{expense['amount']:,.0f}")
             cols[2].write(f"_{expense['category']}_")
 
             if cols[3].button("✏️", key=f"edit_{expense['id']}",
@@ -171,7 +216,7 @@ try:
                             key=f"e_title_{expense['id']}",
                         )
                         new_amount = st.number_input(
-                            "Amount (₹)",
+                            f"Amount ({BASE_SYMBOL})",
                             value=float(expense["amount"]),
                             min_value=0.0, step=50.0,
                             key=f"e_amt_{expense['id']}",

@@ -8,6 +8,13 @@ from api_client import get
 st.set_page_config(page_title="Monthly Summary", page_icon="📊", layout="wide")
 st.title("📊 Monthly Summary")
 
+# Load base currency for display
+try:
+    _settings = get("/settings")
+    SYMBOL = _settings["symbol"]
+except Exception:
+    SYMBOL = "₹"
+
 # ============= Month / Year selector =============
 MONTHS = ["January", "February", "March", "April", "May", "June",
           "July", "August", "September", "October", "November", "December"]
@@ -40,7 +47,7 @@ if not data.get("summary"):
 col_a, col_b = st.columns(2)
 col_a.metric(
     f"Total Spent in {data['month']}",
-    f"₹{data['total']:,.0f}",
+    f"{SYMBOL}{data['total']:,.0f}",
     help=f"{data.get('expense_count', 0)} transactions",
 )
 col_b.metric(
@@ -68,14 +75,14 @@ with left:
         color_discrete_sequence=px.colors.qualitative.Set3,
     )
     fig.update_traces(textinfo="percent+label",
-                      hovertemplate="%{label}: ₹%{value:,.0f}<extra></extra>")
+                      hovertemplate=f"%{{label}}: {SYMBOL}%{{value:,.0f}}<extra></extra>")
     st.plotly_chart(fig, use_container_width=True)
 
 with right:
     st.subheader("Breakdown Table")
     df_display = df.copy()
     df_display["Percentage"] = (df_display["Amount"] / df_display["Amount"].sum() * 100).round(1)
-    df_display["Amount"] = df_display["Amount"].apply(lambda x: f"₹{x:,.0f}")
+    df_display["Amount"] = df_display["Amount"].apply(lambda x: f"{SYMBOL}{x:,.0f}")
     df_display["Percentage"] = df_display["Percentage"].apply(lambda x: f"{x}%")
     st.dataframe(df_display, hide_index=True, use_container_width=True)
 
@@ -84,5 +91,5 @@ with right:
     pct = (top_cat["Amount"] / data["total"]) * 100
     st.info(
         f"🏆 Your biggest expense category is **{top_cat['Category']}** "
-        f"at ₹{top_cat['Amount']:,.0f} ({pct:.0f}%)"
+        f"at {SYMBOL}{top_cat['Amount']:,.0f} ({pct:.0f}%)"
     )
