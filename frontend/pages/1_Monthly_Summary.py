@@ -1,4 +1,5 @@
 """Monthly Summary page — category breakdown with pie chart."""
+from datetime import datetime
 import streamlit as st
 import plotly.express as px
 import pandas as pd
@@ -7,8 +8,26 @@ from api_client import get
 st.set_page_config(page_title="Monthly Summary", page_icon="📊", layout="wide")
 st.title("📊 Monthly Summary")
 
+# ============= Month / Year selector =============
+MONTHS = ["January", "February", "March", "April", "May", "June",
+          "July", "August", "September", "October", "November", "December"]
+current_year = datetime.now().year
+current_month_name = datetime.now().strftime("%B")
+
+filter_col1, filter_col2, _ = st.columns([1, 1, 3])
+with filter_col1:
+    selected_month = st.selectbox(
+        "Month", MONTHS, index=MONTHS.index(current_month_name)
+    )
+with filter_col2:
+    # Show 5 years back, plus current year, plus 1 year forward
+    year_options = list(range(current_year - 4, current_year + 2))
+    selected_year = st.selectbox(
+        "Year", year_options, index=year_options.index(current_year)
+    )
+
 try:
-    data = get("/expenses/summary/monthly")
+    data = get(f"/expenses/summary/monthly?month={selected_month}&year={selected_year}")
 except Exception as e:
     st.error(f"Could not load data: {e}")
     st.stop()
