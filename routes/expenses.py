@@ -40,9 +40,12 @@ async def add_expense(expense: Expense):
         date_str = datetime.now().strftime("%d %B %Y")
 
     base_currency = await get_base_currency()
-    amount_fields = build_amount_fields(
-        expense.amount, expense.currency.upper(), base_currency
-    )
+    try:
+        amount_fields = build_amount_fields(
+            expense.amount, expense.currency.upper(), base_currency
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     expense_dict = {
         "title": expense.title,

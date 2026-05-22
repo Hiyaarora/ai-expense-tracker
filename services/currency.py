@@ -56,6 +56,50 @@ def supported(currency: str) -> bool:
     return currency in CURRENCIES
 
 
+def _format_indian(amount: float, decimals: int) -> str:
+    """Indian-style comma grouping (1,00,000 / 10,00,000 / 1,23,45,678)."""
+    if decimals > 0:
+        s = f"{amount:.{decimals}f}"
+        int_part, _, dec_part = s.partition(".")
+    else:
+        int_part = str(int(round(amount)))
+        dec_part = ""
+    negative = int_part.startswith("-")
+    if negative:
+        int_part = int_part[1:]
+    if len(int_part) <= 3:
+        grouped = int_part
+    else:
+        last3 = int_part[-3:]
+        rest = int_part[:-3]
+        parts = []
+        while len(rest) > 2:
+            parts.insert(0, rest[-2:])
+            rest = rest[:-2]
+        if rest:
+            parts.insert(0, rest)
+        grouped = ",".join(parts) + "," + last3
+    if negative:
+        grouped = "-" + grouped
+    return f"{grouped}.{dec_part}" if dec_part else grouped
+
+
+def format_amount(amount, currency: str, decimals: int = 0) -> str:
+    """Locale-aware number formatting. INR -> '1,00,000'; others -> '100,000'.
+
+    Returns plain numeric string (no currency symbol). Caller prepends symbol.
+    """
+    if amount is None:
+        return "0"
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return str(amount)
+    if (currency or "").upper() == "INR":
+        return _format_indian(amount, decimals)
+    return f"{amount:,.{decimals}f}"
+
+
 def get_rate(from_currency: str, to_currency: str) -> float:
     """Get the exchange rate from one currency to another.
 
@@ -94,7 +138,15 @@ def build_amount_fields(amount: float, input_currency: str, base_currency: str) 
 
     If input and base currencies match: just amount + currency.
     If different: converts and also stores original amount + rate for transparency.
+
+    Raises ValueError if input_currency is not a supported code.
     """
+    input_currency = (input_currency or "").upper()
+    if not supported(input_currency):
+        raise ValueError(
+            f"Unsupported currency: '{input_currency}'. "
+            f"Supported: {list(CURRENCIES.keys())}"
+        )
     if input_currency == base_currency:
         return {"amount": float(amount), "currency": base_currency}
 

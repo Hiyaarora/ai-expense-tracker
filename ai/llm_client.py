@@ -59,10 +59,13 @@ def generate_budget_advice(summary_data: dict, salary):
 
 
 def parse_expense_text(text: str) -> dict:
-    """Parse a free-form sentence into {title, amount, category}.
+    """Parse a free-form sentence into {title, amount, category, currency_hint}.
 
-    Returns dict with those 3 keys, or raises ValueError if parsing fails.
+    currency_hint is the 3-letter code the AI detected in the text, or None.
+    Raises ValueError if title or amount couldn't be extracted.
     """
+    from services.currency import supported as _supported_currency
+
     valid_cats = {"Food", "Transport", "Shopping", "Bills",
                   "Entertainment", "Health", "Education", "Miscellaneous"}
     raw = _ask_groq(PARSE_EXPENSE_PROMPT, text, max_tokens=250)
@@ -89,7 +92,20 @@ def parse_expense_text(text: str) -> dict:
     if category not in valid_cats:
         category = "Miscellaneous"
 
-    return {"title": title, "amount": float(amount), "category": category}
+    # Validate currency hint — only trust it if it's a supported 3-letter code
+    raw_curr = parsed.get("currency")
+    currency_hint = None
+    if isinstance(raw_curr, str):
+        candidate = raw_curr.strip().upper()
+        if _supported_currency(candidate):
+            currency_hint = candidate
+
+    return {
+        "title": title,
+        "amount": float(amount),
+        "category": category,
+        "currency_hint": currency_hint,
+    }
 
 
 def categorize_expense(title: str) -> str:
@@ -107,7 +123,15 @@ def chat_with_tools(user_message: str, history: list) -> str:
     history: list of {"role": "user"|"assistant", "content": "..."} dicts.
     Returns the final assistant text after Groq calls any needed tools.
     """
-    messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+    from datetime import datetime
+    now = datetime.now()
+    system_prompt = CHAT_SYSTEM_PROMPT.format(
+        today=now.strftime("%d %B %Y"),
+        current_month=now.strftime("%B"),
+        current_year=now.year,
+    )
+
+    messages = [{"role": "system", "content": system_prompt}]
     for msg in history or []:
         if msg.get("content"):
             messages.append({"role": msg["role"], "content": msg["content"]})

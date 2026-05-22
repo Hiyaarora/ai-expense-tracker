@@ -88,9 +88,12 @@ async def smart_add_expense(expense: SmartExpense):
     category = categorize_expense(expense.title)
     date_str = _resolve_date(expense.date)
     base_currency = await get_base_currency()
-    amount_fields = build_amount_fields(
-        expense.amount, expense.currency.upper(), base_currency
-    )
+    try:
+        amount_fields = build_amount_fields(
+            expense.amount, expense.currency.upper(), base_currency
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     doc = {
         "title": expense.title,
         "category": category,
@@ -123,10 +126,19 @@ async def natural_add_expense(nl: NaturalExpense):
 
     date_str = _resolve_date(nl.date)
     base_currency = await get_base_currency()
-    input_currency = (nl.currency or base_currency).upper()
-    amount_fields = build_amount_fields(
-        parsed["amount"], input_currency, base_currency
-    )
+
+    # Prefer AI-detected currency from the text; fall back to dropdown; else base
+    input_currency = (
+        parsed.get("currency_hint")
+        or (nl.currency or base_currency)
+    ).upper()
+
+    try:
+        amount_fields = build_amount_fields(
+            parsed["amount"], input_currency, base_currency
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     doc = {
         "title": parsed["title"],

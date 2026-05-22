@@ -1,11 +1,15 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from database import salary_collection
 from models import Salary
 from datetime import datetime
 
 # ✅ Import helper functions
 from routes.expenses import fetch_expenses_by_month, get_base_currency
-from services.currency import convert as convert_currency
+from services.currency import (
+    convert as convert_currency,
+    supported as supported_currency,
+    CURRENCIES,
+)
 
 router = APIRouter()
 
@@ -14,6 +18,11 @@ async def _to_base_currency(amount: float, input_currency: str) -> dict:
     """Return (converted_amount, base_currency, original_amount, original_currency, rate)."""
     base = await get_base_currency()
     input_currency = (input_currency or base).upper()
+    if not supported_currency(input_currency):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported currency: '{input_currency}'. Supported: {list(CURRENCIES.keys())}",
+        )
     if input_currency == base:
         return {
             "amount": float(amount),
