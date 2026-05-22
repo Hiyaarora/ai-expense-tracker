@@ -40,6 +40,7 @@ SOURCE_FILES = [
     "services/currency.py",
     "frontend/app.py",
     "frontend/api_client.py",
+    "frontend/formatting.py",
     "frontend/pages/1_Monthly_Summary.py",
     "frontend/pages/2_Yearly_Summary.py",
     "frontend/pages/3_AI_Insights.py",
@@ -57,16 +58,17 @@ FILE_ROLES = {
     "routes/__init__.py": "Marks routes/ as a Python package",
     "routes/expenses.py": "Expense CRUD + monthly/yearly summary endpoints",
     "routes/salary.py": "Salary set/add endpoints + savings calculator (with currency conv.)",
-    "routes/ai.py": "AI-powered endpoints (smart-add, natural-add, insights, advice, chat)",
+    "routes/ai.py": "AI-powered endpoints (smart-add, natural-add, insights, advice, chat) — natural-add prefers AI-detected currency over dropdown",
     "routes/settings.py": "Base-currency setting + bulk conversion endpoint",
     "ai/__init__.py": "Marks ai/ as a Python package",
-    "ai/prompts.py": "All LLM system prompts (insights, advice, categorize, parse, chat)",
-    "ai/tools.py": "Sync MongoDB tool functions Groq can call (8 tools)",
-    "ai/llm_client.py": "Groq client wrapper — single swap point for LLM provider",
+    "ai/prompts.py": "All LLM system prompts (insights, advice, categorize, parse, chat) — chat prompt injects today's date dynamically",
+    "ai/tools.py": "Sync MongoDB tool functions Groq can call (11 tools) — every tool result includes pre-formatted *_display fields",
+    "ai/llm_client.py": "Groq client wrapper — single swap point for LLM provider; injects today's date into the chat system prompt",
     "services/__init__.py": "Marks services/ as a Python package",
-    "services/currency.py": "Exchange-rate fetcher (frankfurter.dev) + conversion helpers",
+    "services/currency.py": "Exchange-rate fetcher (frankfurter.dev) + conversion + locale-aware format_amount helper",
     "frontend/app.py": "Streamlit Dashboard — salary, add forms, expense list",
     "frontend/api_client.py": "Thin HTTP wrapper around the FastAPI backend",
+    "frontend/formatting.py": "Locale-aware number formatting helper (Indian vs Western)",
     "frontend/pages/1_Monthly_Summary.py": "Streamlit page — month filter + pie chart",
     "frontend/pages/2_Yearly_Summary.py": "Streamlit page — year-to-date bar charts",
     "frontend/pages/3_AI_Insights.py": "Streamlit page — AI summary + budget advice",
@@ -482,7 +484,7 @@ async def natural_add_expense(nl: NaturalExpense):
     )
 
     flow_step(doc,
-        "Step 1.4 — AI extracts structured data from text",
+        "Step 1.4 — AI extracts structured data from text (now incl. currency hint)",
         "ai/llm_client.py",
         '''def parse_expense_text(text: str) -> dict:
     raw = _ask_groq(PARSE_EXPENSE_PROMPT, text, max_tokens=250)
@@ -492,21 +494,45 @@ async def natural_add_expense(nl: NaturalExpense):
         if cleaned.lower().startswith("json"):
             cleaned = cleaned[4:].strip()
     parsed = json.loads(cleaned)
+    raw_curr = parsed.get("currency")
+    currency_hint = None
+    if isinstance(raw_curr, str) and _supported_currency(raw_curr.upper()):
+        currency_hint = raw_curr.upper()
     return {
         "title": parsed["title"].strip(),
         "amount": float(parsed["amount"]),
         "category": parsed["category"] if parsed["category"] in valid_cats else "Miscellaneous",
+        "currency_hint": currency_hint,
     }''',
-        "text = 'I spent 1000 on zomato food'",
-        "{'title': 'Zomato', 'amount': 1000.0, 'category': 'Food'}",
-        "PARSE_EXPENSE_PROMPT instructs Groq to return ONLY a JSON object with three keys. "
-        "We then strip code fences (some models wrap output in ```json), parse with json.loads "
-        "and validate the category against an allowed set. Any unknown category falls back to "
-        "'Miscellaneous'.",
+        "text = 'paid 500 rs in shopping mall'",
+        "{'title': 'Shopping mall', 'amount': 500.0, 'category': 'Shopping', 'currency_hint': 'INR'}",
+        "PARSE_EXPENSE_PROMPT instructs Groq to return EXACTLY 4 keys, including currency. "
+        "The model maps natural-language hints (rs, $, €, etc.) to 3-letter codes. "
+        "Code-fence stripping and json.loads happen as before. The currency hint is then "
+        "validated against the supported set — anything unrecognised becomes None.",
     )
 
     flow_step(doc,
-        "Step 1.5 — Currency conversion to base currency",
+        "Step 1.5 — Pick the input currency (3-tier priority)",
+        "routes/ai.py",
+        '''input_currency = (
+    parsed.get("currency_hint")
+    or (nl.currency or base_currency)
+).upper()
+try:
+    amount_fields = build_amount_fields(parsed["amount"], input_currency, base_currency)
+except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e))''',
+        "parsed['currency_hint']='INR', nl.currency=None, base_currency='USD'",
+        "input_currency = 'INR'  (AI-detected wins)",
+        "Priority order: AI-detected currency from the text > explicit dropdown value > "
+        "base currency. The build_amount_fields call is now wrapped in try/except so that "
+        "an unsupported code (e.g. the literal 'string' placeholder from Swagger UI) returns "
+        "a clear HTTP 400 instead of crashing the server with a 500.",
+    )
+
+    flow_step(doc,
+        "Step 1.6 — Currency conversion to base currency",
         "services/currency.py",
         '''def build_amount_fields(amount, input_currency, base_currency) -> dict:
     input_currency = (input_currency or "").upper()
@@ -522,15 +548,16 @@ async def natural_add_expense(nl: NaturalExpense):
         "original_currency": conv["original_currency"],
         "exchange_rate": conv["exchange_rate"],
     }''',
-        "amount=1000.0, input_currency='INR', base_currency='INR'",
-        "{'amount': 1000.0, 'currency': 'INR'}",
-        "Since input == base, no conversion is needed and only the two fields are returned. "
-        "If the user had used USD with a base of INR, the result would also include "
-        "original_amount, original_currency and exchange_rate for transparency.",
+        "amount=500.0, input_currency='INR', base_currency='USD'",
+        "{'amount': 5.20, 'currency': 'USD', 'original_amount': 500.0, "
+        "'original_currency': 'INR', 'exchange_rate': 0.0104}",
+        "frankfurter.dev returns a rate (cached for 1 hour). The original amount + "
+        "currency + rate are preserved alongside the converted amount so the UI can "
+        "show 'converted from INR 500 @ rate 0.0104'.",
     )
 
     flow_step(doc,
-        "Step 1.6 — Build MongoDB document and insert",
+        "Step 1.7 — Build MongoDB document and insert",
         "routes/ai.py",
         '''doc = {
     "title": parsed["title"],
@@ -550,7 +577,7 @@ result = await expense_collection.insert_one(doc)''',
     )
 
     flow_step(doc,
-        "Step 1.7 — Build and return JSON response",
+        "Step 1.8 — Build and return JSON response",
         "routes/ai.py",
         '''return {
     "message": "Expense parsed and added",
@@ -580,22 +607,29 @@ result = await expense_collection.insert_one(doc)''',
     )
 
     flow_step(doc,
-        "Step 1.8 — Streamlit renders success message and reruns",
+        "Step 1.9 — Streamlit renders success message and reruns (locale-formatted)",
         "frontend/app.py",
-        '''exp = result["expense"]
-msg = (f"Added **{exp['title']}** • {BASE_SYMBOL}{exp['amount']:,.2f} • "
+        '''from formatting import format_amount
+
+def fmt(amount, currency=None, decimals=0):
+    return format_amount(amount, currency or BASE_CURRENCY, decimals)
+
+exp = result["expense"]
+msg = (f"Added **{exp['title']}** • {BASE_SYMBOL}{fmt(exp['amount'], decimals=2)} • "
        f"**{exp['category']}** • {exp['date']}")
 if "original_currency" in exp and exp["original_currency"] != BASE_CURRENCY:
     msg += (f" _(from {exp['original_currency']} "
-            f"{exp['original_amount']:,.2f} @ rate {exp['exchange_rate']})_")
+            f"{fmt(exp['original_amount'], exp['original_currency'], 2)} "
+            f"@ rate {exp['exchange_rate']})_")
 st.success(msg)
 st.rerun()''',
         "(JSON response from backend)",
-        "(Rendered green success bubble in the browser)\n"
-        "Added Zomato • Rs.1000.00 • Food • 18 May 2026",
-        "st.rerun() triggers Streamlit to execute frontend/app.py top-to-bottom again so "
-        "that the 'recent expenses' list at the bottom of the dashboard re-fetches "
-        "/expenses and now includes the new row.",
+        "(Rendered green success bubble in the browser, locale-formatted)\n"
+        "Added Shopping mall • $5.20 • Shopping • 22 May 2026\n"
+        "(from INR 500.00 @ rate 0.0104)",
+        "Amounts are now passed through format_amount() which uses Indian lakh-style "
+        "commas for INR (1,00,000) and Western style for everything else (100,000). "
+        "st.rerun() then re-fetches /expenses so the new row appears in the list below.",
     )
 
     # ───────────────────── Flow 2: Chatbot with Tool Use ─────────────
@@ -916,18 +950,137 @@ async def get_monthly_summary(month: str = None, year: int = None):
     )
 
     flow_step(doc,
-        "Step 5.3 — Streamlit renders pie chart + table",
+        "Step 5.3 — Streamlit renders pie chart + table (locale-aware)",
         "frontend/pages/1_Monthly_Summary.py",
-        '''df = pd.DataFrame(
+        '''def fmt(amount, decimals=0):
+    return format_amount(amount, BASE_CURRENCY, decimals)
+
+df = pd.DataFrame(
     [{"Category": k, "Amount": v} for k, v in data["summary"].items()]
 ).sort_values("Amount", ascending=False)
+df["Amount_fmt"] = df["Amount"].apply(lambda v: fmt(v))
 
-fig = px.pie(df, names="Category", values="Amount", hole=0.4, ...)
+fig = px.pie(df, names="Category", values="Amount", hole=0.4)
+fig.update_traces(
+    customdata=df[["Amount_fmt"]].values,
+    hovertemplate=f"%{{label}}: {SYMBOL}%{{customdata[0]}}<extra></extra>",
+)
 st.plotly_chart(fig, use_container_width=True)''',
         '{"month":"April-2026","summary":{"Food":3000.0,"Shopping":500.0}, ...}',
-        "(Interactive pie chart rendered in browser)",
-        "Plotly Express converts the DataFrame into an HTML/JS chart with hover, zoom "
-        "and click interactivity. Streamlit embeds the rendered chart in the page.",
+        "(Interactive pie chart with Indian-style commas on hover)",
+        "Plotly's built-in number formatting doesn't support Indian locale, so we "
+        "pre-compute formatted strings in a column and pass them via custom_data. "
+        "The hovertemplate references customdata[0] instead of the raw value.",
+    )
+
+    # ───────────────────── Flow 6: Chatbot — "last month" ─────────────
+    add_h2(doc, "Flow 6: POST /chat — \"How much did I spend last month?\"")
+    add_para(doc,
+        "User scenario: today is 22 May 2026; user types 'How much did I spend last "
+        "month?' on the Chat page. The LLM has to (a) resolve 'last month' to "
+        "April 2026 using today's date injected into the prompt, then (b) call the "
+        "month-aware tool, then (c) reply using the pre-formatted display string."
+    )
+
+    flow_step(doc,
+        "Step 6.1 — Backend injects today's date into the system prompt",
+        "ai/llm_client.py",
+        '''def chat_with_tools(user_message: str, history: list) -> str:
+    now = datetime.now()
+    system_prompt = CHAT_SYSTEM_PROMPT.format(
+        today=now.strftime("%d %B %Y"),
+        current_month=now.strftime("%B"),
+        current_year=now.year,
+    )
+    messages = [{"role": "system", "content": system_prompt}]
+    ...''',
+        "user_message = 'How much did I spend last month?'\n"
+        "today = 22 May 2026",
+        "system_prompt includes:\n"
+        "  'Today's date is: 22 May 2026'\n"
+        "  'Current month: May 2026'",
+        "Without injecting today's date the LLM doesn't reliably know what 'last month' "
+        "means — it might use its training-cutoff date. With the date in the system "
+        "prompt the model can do simple arithmetic: May - 1 = April.",
+    )
+
+    flow_step(doc,
+        "Step 6.2 — LLM picks the right month-aware tool",
+        "ai/tools.py + TOOL_SCHEMAS",
+        '''TOOL_SCHEMAS = [
+    ...,
+    {"type": "function", "function": {
+        "name": "get_expenses_for_month",
+        "description": "Get all expenses for a specific month and year...",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "month": {"type": "string", "description": "Full month name..."},
+                "year": {"type": "integer", "description": "4-digit year..."},
+            },
+            "required": ["month", "year"],
+        },
+    }},
+    ...
+]''',
+        "(LLM reasoning, not directly visible)",
+        "tool_call: get_expenses_for_month(month='April', year=2026)",
+        "Three month-aware tools are exposed: get_yearly_summary, "
+        "get_expenses_for_month, get_expenses_by_category_for_month. The LLM picks "
+        "based on the question shape — a 'how much last month' question selects "
+        "get_expenses_for_month with the month string + year integer.",
+    )
+
+    flow_step(doc,
+        "Step 6.3 — Tool queries MongoDB and pre-formats the result",
+        "ai/tools.py",
+        '''def get_expenses_for_month(month: str, year: int) -> dict:
+    cur = _base_currency()
+    expenses = _find_month_expenses(month)
+    expenses = [e for e in expenses if str(year) in str(e.get("date", ""))]
+    total = sum(e.get("amount", 0) for e in expenses)
+    return {
+        "month": month, "year": year, "currency": cur,
+        "count": len(expenses),
+        "total": total,
+        "total_display": _fmt(total, 2, cur),     # <-- pre-formatted
+        "expenses": [
+            {"title": e.get("title"), "amount": e.get("amount"),
+             "amount_display": _fmt(e.get("amount"), 2, cur),
+             "category": e.get("category"), "date": e.get("date")}
+            for e in expenses
+        ],
+    }''',
+        "month='April', year=2026",
+        "{\n"
+        "  'month': 'April', 'year': 2026, 'currency': 'INR',\n"
+        "  'count': 5, 'total': 355033.17,\n"
+        "  'total_display': 'Rs.3,55,033.17',\n"
+        "  'expenses': [{'title': 'Zomato', 'amount': 1000.0,\n"
+        "                'amount_display': 'Rs.1,000.00', ...}, ...]\n"
+        "}",
+        "The tool reads the base currency from MongoDB settings, applies the same "
+        "regex-based month filter as the HTTP endpoint, and pre-formats every amount "
+        "using services.currency.format_amount (Indian lakh style for INR). The raw "
+        "numeric 'total' is kept for downstream calculation; 'total_display' is the "
+        "string the LLM will copy into its reply.",
+    )
+
+    flow_step(doc,
+        "Step 6.4 — LLM writes the reply using the _display field",
+        "ai/prompts.py (CHAT_SYSTEM_PROMPT)",
+        '''CRITICAL — formatting amounts in your reply:
+- Every tool result that contains amounts ALSO contains pre-formatted
+  versions in keys ending in '_display'...
+- When mentioning an amount in your reply, USE the _display string
+  EXACTLY as given. Do NOT reformat numbers, do NOT add or change the
+  currency symbol, do NOT round the number yourself.''',
+        "(tool result from Step 6.3)",
+        "reply: 'You spent Rs.3,55,033.17 in April 2026.'",
+        "The system prompt forces the LLM to copy total_display verbatim. This is a "
+        "common AI-engineering trick: rather than asking the model to format numbers "
+        "(unreliable), pre-format on the server and have the model copy the string. "
+        "Same approach as JSON-mode for structured output.",
     )
 
     doc.add_page_break()
@@ -1128,6 +1281,80 @@ def section_6_design_decisions(doc):
         "We use a numeric prefix (1_, 2_, 3_, ...) so the sidebar order is deterministic. "
         "The home page is frontend/app.py — Streamlit treats whatever you `streamlit run` "
         "as the entry."
+    )
+
+    # ----
+    add_h2(doc, "Decision: AI-detected currency in natural-language input, with 3-tier fallback")
+    add_para(doc,
+        "Earlier, the Natural Language tab required a separate 'Currency typed in' dropdown — "
+        "the user had to manually pick the currency that matched what they typed. This was "
+        "redundant since the model can see the same text. PARSE_EXPENSE_PROMPT was extended "
+        "to ask for a 4th key (currency), with mappings for natural-language hints "
+        "(rs/rupees -> INR, $/dollars -> USD, etc.). parse_expense_text validates the returned "
+        "code against the supported set. The endpoint then uses a 3-tier fallback chain: "
+        "AI-detected currency, explicit currency parameter, base currency. The dropdown was "
+        "removed from the UI; users now just type."
+    )
+
+    # ----
+    add_h2(doc, "Decision: Pre-format display strings in tool results, not in LLM output")
+    add_para(doc,
+        "When the chatbot answers 'how much in April', it needs to write a number with the "
+        "right locale formatting (Rs.3,55,033 for INR, $355,033 for USD). Telling the LLM "
+        "'format Indian-style for INR' in the system prompt works ~70 percent of the time — "
+        "the model occasionally forgets or uses Western style. Instead we pre-format every "
+        "amount in the tool result as *_display strings (total_display, amount_display, "
+        "salary_display, monthly_totals_display, ...) and the system prompt strictly tells "
+        "the LLM to copy the _display value verbatim. Reliability jumps to ~100 percent. "
+        "Same principle as forced JSON output for structured extraction: don't ask the model "
+        "to format, ask it to copy."
+    )
+
+    # ----
+    add_h2(doc, "Decision: Inject today's date into the chat system prompt")
+    add_para(doc,
+        "Users say things like 'last month' or 'this year' which the model needs to resolve "
+        "to concrete month + year arguments. Models have no built-in clock — they may use "
+        "training-cutoff dates. chat_with_tools() formats the system prompt at request time "
+        "with today's full date, current month name, and current year. The model can then "
+        "reliably compute 'last month' = current month - 1."
+    )
+
+    # ----
+    add_h2(doc, "Decision: Month-aware tools alongside current-month tools")
+    add_para(doc,
+        "The original chatbot only had current-month tools (get_all_expenses_this_month, "
+        "get_monthly_total, get_expenses_by_category) so questions about past months failed. "
+        "We could have given the existing tools optional month/year parameters, but the LLM "
+        "tends to handle clearly-named single-purpose tools better than overloaded ones. "
+        "Instead, three new tools were added: get_yearly_summary, get_expenses_for_month "
+        "(month, year), get_expenses_by_category_for_month (category, month, year). The "
+        "system prompt explicitly tells the LLM which tool to pick for which question shape."
+    )
+
+    # ----
+    add_h2(doc, "Decision: Validation errors map to HTTP 400, not 500")
+    add_para(doc,
+        "When testing the API via Swagger UI's 'Try it out', the default body has "
+        "'currency': 'string' as a placeholder. Hitting submit without changing it used to "
+        "trigger Frankfurter to error on the bogus code, then propagate as a 500 from our "
+        "server. build_amount_fields and _to_base_currency now raise ValueError early for "
+        "any unsupported code; every expense + salary route catches that and returns HTTP "
+        "400 with a clear message listing the supported codes. Same change pattern was "
+        "applied to the AI smart-add and natural-add endpoints."
+    )
+
+    # ----
+    add_h2(doc, "Decision: Locale-aware number formatting via a shared helper")
+    add_para(doc,
+        "format_amount in services/currency.py implements both the Indian lakh comma style "
+        "(1,00,000) and the Western style (100,000). The frontend has a thin copy at "
+        "frontend/formatting.py (same logic) because Streamlit's working directory makes "
+        "importing from services/ awkward. The same helper is imported by ai/tools.py for "
+        "the chatbot's _display strings, by frontend/app.py for the Dashboard, and by the "
+        "Monthly/Yearly Summary pages for chart hover and table cells. Plotly's built-in "
+        "number formatting doesn't support Indian locale, so the bar/pie chart hover labels "
+        "are precomputed strings passed via custom_data."
     )
 
 

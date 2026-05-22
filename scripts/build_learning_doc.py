@@ -45,6 +45,7 @@ SOURCE_FILES = [
     ("Frontend", [
         "frontend/app.py",
         "frontend/api_client.py",
+        "frontend/formatting.py",
         "frontend/pages/1_Monthly_Summary.py",
         "frontend/pages/2_Yearly_Summary.py",
         "frontend/pages/3_AI_Insights.py",
