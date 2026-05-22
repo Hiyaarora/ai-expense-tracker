@@ -4,6 +4,7 @@ import streamlit as st
 import plotly.express as px
 import pandas as pd
 from api_client import get
+from formatting import format_amount
 
 st.set_page_config(page_title="Monthly Summary", page_icon="📊", layout="wide")
 st.title("📊 Monthly Summary")
@@ -12,8 +13,14 @@ st.title("📊 Monthly Summary")
 try:
     _settings = get("/settings")
     SYMBOL = _settings["symbol"]
+    BASE_CURRENCY = _settings["base_currency"]
 except Exception:
     SYMBOL = "₹"
+    BASE_CURRENCY = "INR"
+
+
+def fmt(amount, decimals=0):
+    return format_amount(amount, BASE_CURRENCY, decimals)
 
 # ============= Month / Year selector =============
 MONTHS = ["January", "February", "March", "April", "May", "June",
@@ -47,7 +54,7 @@ if not data.get("summary"):
 col_a, col_b = st.columns(2)
 col_a.metric(
     f"Total Spent in {data['month']}",
-    f"{SYMBOL}{data['total']:,.0f}",
+    f"{SYMBOL}{fmt(data['total'])}",
     help=f"{data.get('expense_count', 0)} transactions",
 )
 col_b.metric(
@@ -74,15 +81,20 @@ with left:
         hole=0.4,
         color_discrete_sequence=px.colors.qualitative.Set3,
     )
-    fig.update_traces(textinfo="percent+label",
-                      hovertemplate=f"%{{label}}: {SYMBOL}%{{value:,.0f}}<extra></extra>")
+    # Pre-format amounts so the pie chart hover uses Indian-style commas for INR
+    df["Amount_fmt"] = df["Amount"].apply(lambda v: fmt(v))
+    fig.update_traces(
+        textinfo="percent+label",
+        customdata=df[["Amount_fmt"]].values,
+        hovertemplate=f"%{{label}}: {SYMBOL}%{{customdata[0]}}<extra></extra>",
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 with right:
     st.subheader("Breakdown Table")
     df_display = df.copy()
     df_display["Percentage"] = (df_display["Amount"] / df_display["Amount"].sum() * 100).round(1)
-    df_display["Amount"] = df_display["Amount"].apply(lambda x: f"{SYMBOL}{x:,.0f}")
+    df_display["Amount"] = df_display["Amount"].apply(lambda x: f"{SYMBOL}{fmt(x)}")
     df_display["Percentage"] = df_display["Percentage"].apply(lambda x: f"{x}%")
     st.dataframe(df_display, hide_index=True, use_container_width=True)
 
@@ -91,5 +103,5 @@ with right:
     pct = (top_cat["Amount"] / data["total"]) * 100
     st.info(
         f"🏆 Your biggest expense category is **{top_cat['Category']}** "
-        f"at {SYMBOL}{top_cat['Amount']:,.0f} ({pct:.0f}%)"
+        f"at {SYMBOL}{fmt(top_cat['Amount'])} ({pct:.0f}%)"
     )

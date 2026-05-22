@@ -2,6 +2,12 @@
 from datetime import date
 import streamlit as st
 from api_client import get, post, put, delete
+from formatting import format_amount
+
+
+def fmt(amount, currency=None, decimals=0):
+    """Shorthand: format amount in the user's base currency unless overridden."""
+    return format_amount(amount, currency or BASE_CURRENCY, decimals)
 
 # Load base currency once per render
 try:
@@ -34,7 +40,7 @@ with col_sal_a:
         salary_data = get("/salary")
         if "total_salary" in salary_data:
             st.metric("This Month's Salary",
-                      f"{BASE_SYMBOL}{salary_data['total_salary']:,.0f}")
+                      f"{BASE_SYMBOL}{fmt(salary_data['total_salary'])}")
         else:
             st.info("No salary recorded for this month yet.")
     except Exception as e:
@@ -66,8 +72,10 @@ with col_sal_b:
                 result = put("/salary", {"amount": set_amt, "currency": set_curr})
                 if result.get("original_currency"):
                     st.success(
-                        f"Set salary: {result['original_currency']} {result['original_amount']:,.2f} → "
-                        f"{BASE_SYMBOL}{result['total_salary']:,.2f} (rate {result['exchange_rate']})"
+                        f"Set salary: {result['original_currency']} "
+                        f"{fmt(result['original_amount'], result['original_currency'], 2)} → "
+                        f"{BASE_SYMBOL}{fmt(result['total_salary'], decimals=2)} "
+                        f"(rate {result['exchange_rate']})"
                     )
                 st.rerun()
 
@@ -95,13 +103,14 @@ with col_sal_b:
                 result = post("/salary", {"amount": add_amt, "currency": add_curr})
                 if result.get("original_currency"):
                     st.success(
-                        f"Added: {result['original_currency']} {result['original_amount']:,.2f} → "
-                        f"{BASE_SYMBOL}{result['added_amount']:,.2f} "
+                        f"Added: {result['original_currency']} "
+                        f"{fmt(result['original_amount'], result['original_currency'], 2)} → "
+                        f"{BASE_SYMBOL}{fmt(result['added_amount'], decimals=2)} "
                         f"(rate {result['exchange_rate']}). "
-                        f"New total: {BASE_SYMBOL}{result['total_salary']:,.2f}"
+                        f"New total: {BASE_SYMBOL}{fmt(result['total_salary'], decimals=2)}"
                     )
                 else:
-                    st.success(f"New total salary: {BASE_SYMBOL}{result['total_salary']:,.2f}")
+                    st.success(f"New total salary: {BASE_SYMBOL}{fmt(result['total_salary'], decimals=2)}")
                 st.rerun()
 
 # ============================ Savings ============================
@@ -110,9 +119,9 @@ try:
     savings = get("/savings")
     if "summary" in savings:
         c1, c2, c3 = st.columns(3)
-        c1.metric("Salary", f"{BASE_SYMBOL}{savings['summary']['salary']:,.0f}")
-        c2.metric("Spent", f"{BASE_SYMBOL}{savings['summary']['total_expenses']:,.0f}")
-        c3.metric("Savings", f"{BASE_SYMBOL}{savings['summary']['savings']:,.0f}")
+        c1.metric("Salary", f"{BASE_SYMBOL}{fmt(savings['summary']['salary'])}")
+        c2.metric("Spent", f"{BASE_SYMBOL}{fmt(savings['summary']['total_expenses'])}")
+        c3.metric("Savings", f"{BASE_SYMBOL}{fmt(savings['summary']['savings'])}")
         st.caption(savings.get("status", ""))
     else:
         st.info(savings.get("message", "Add salary to see savings."))
@@ -132,25 +141,17 @@ tab_nl, tab_manual = st.tabs([
 # -------- Natural Language Tab --------
 with tab_nl:
     st.caption(
-        "Type a full sentence — AI extracts title, amount, AND category. "
-        "Example: _\"I spent 1000 rs on food at zomato\"_"
+        f"Type a full sentence — AI extracts title, amount, category, and currency. "
+        f"Mention a currency (e.g. _'500 rs'_, _'30 dollars'_, _'25 euros'_) to convert "
+        f"automatically; otherwise the amount is recorded in your base currency "
+        f"(**{BASE_SYMBOL} {BASE_CURRENCY}**)."
     )
     with st.form("nl_form", clear_on_submit=True):
         nl_text = st.text_input(
             "Describe the expense in one line",
-            placeholder='e.g. "Paid 350 for uber to office"',
+            placeholder='e.g. "Paid 350 for uber" or "Spent 30 dollars on lunch"',
         )
-        nl_col1, nl_col2 = st.columns([1, 1])
-        with nl_col1:
-            nl_date = st.date_input("Date", value=date.today(), key="nl_date")
-        with nl_col2:
-            _idx = CURRENCY_CODES.index(BASE_CURRENCY) if BASE_CURRENCY in CURRENCY_CODES else 0
-            nl_curr_label = st.selectbox(
-                "Currency typed in", CURRENCY_LABELS,
-                index=_idx, key="nl_curr",
-                help="Will be converted to your base currency if different.",
-            )
-        nl_currency = CURRENCY_CODES[CURRENCY_LABELS.index(nl_curr_label)]
+        nl_date = st.date_input("Date", value=date.today(), key="nl_date")
 
         if st.form_submit_button("Parse & Add with AI"):
             if nl_text.strip():
@@ -159,14 +160,15 @@ with tab_nl:
                         result = post("/expenses/natural", {
                             "text": nl_text,
                             "date": nl_date.isoformat(),
-                            "currency": nl_currency,
                         })
                         exp = result["expense"]
-                        msg = (f"Added **{exp['title']}** • {BASE_SYMBOL}{exp['amount']:,.2f} • "
+                        msg = (f"Added **{exp['title']}** • "
+                               f"{BASE_SYMBOL}{fmt(exp['amount'], decimals=2)} • "
                                f"**{exp['category']}** • {exp['date']}")
                         if "original_currency" in exp and exp["original_currency"] != BASE_CURRENCY:
                             msg += (f" _(from {exp['original_currency']} "
-                                    f"{exp['original_amount']:,.2f} @ rate {exp['exchange_rate']})_")
+                                    f"{fmt(exp['original_amount'], exp['original_currency'], 2)} "
+                                    f"@ rate {exp['exchange_rate']})_")
                         st.success(msg)
                         st.rerun()
                     except Exception as e:
@@ -202,8 +204,10 @@ with tab_manual:
             exp = result.get("expense", {})
             if "original_currency" in exp and exp["original_currency"] != BASE_CURRENCY:
                 st.success(
-                    f"Converted {exp['original_currency']} {exp['original_amount']:,.2f} → "
-                    f"{BASE_SYMBOL}{exp['amount']:,.2f} (rate {exp['exchange_rate']})"
+                    f"Converted {exp['original_currency']} "
+                    f"{fmt(exp['original_amount'], exp['original_currency'], 2)} → "
+                    f"{BASE_SYMBOL}{fmt(exp['amount'], decimals=2)} "
+                    f"(rate {exp['exchange_rate']})"
                 )
             st.rerun()
 
@@ -229,7 +233,7 @@ try:
             # ----- Row layout: title | amount | category | edit | delete -----
             cols = st.columns([3, 1, 2, 0.6, 0.6])
             cols[0].write(f"**{expense['title']}**")
-            cols[1].write(f"{BASE_SYMBOL}{expense['amount']:,.0f}")
+            cols[1].write(f"{BASE_SYMBOL}{fmt(expense['amount'])}")
             cols[2].write(f"_{expense['category']}_")
 
             if cols[3].button("✏️", key=f"edit_{expense['id']}",
