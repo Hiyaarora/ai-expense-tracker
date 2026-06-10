@@ -1,179 +1,124 @@
-# 💰 AI Expense Tracker
+# AI Expense Tracker
 
-A full-stack, AI-powered personal finance app. Track expenses, get AI-written spending insights, and chat naturally with your data — the chatbot can **read AND modify** your expenses through plain-English conversation.
+A full-stack personal finance application that lets you track expenses, analyze spending with AI, and manage your records through natural conversation. Instead of filling out forms, you can type *"I spent 1000 on food at Zomato"* and the AI extracts the details — or ask the assistant *"How much did I spend on travel this month?"* and it answers directly from your data, and can even add, edit, or delete records on request.
 
-> Built end-to-end as a portfolio project demonstrating modern AI engineering patterns: Tool Use / Function Calling, structured data extraction, and provider-agnostic LLM architecture.
-
----
-
-## ✨ Features
-
-| Feature | What it does |
-|---------|--------------|
-| **🪄 Natural-language expense input** | Type _"I spent 1000 on food at zomato"_ — AI extracts title, amount, and category as structured JSON |
-| **🤖 AI chatbot with Tool Use** | Ask anything ("How much on food?"), edit anything ("Delete coffee", "Change Uber to ₹400"). AI autonomously decides which of 8 database functions to call |
-| **📊 Monthly category breakdown** | Pie chart of spending by category for the current month |
-| **📈 Yearly overview** | Month-by-month and category-wise bar charts from January to now |
-| **📝 AI monthly insights** | Plain-English paragraph analyzing your spending patterns |
-| **💡 AI budget advice** | 3 personalized, specific saving tips based on your real data |
-| **💼 Salary tracking** | Set or add to monthly salary; auto-computed savings |
-| **📅 Date-aware adds** | Backfill expenses for any past date — useful for month-wise records |
+Built as a portfolio project to demonstrate practical AI engineering: tool use / function calling, structured data extraction, and a provider-agnostic LLM architecture.
 
 ---
 
-## 🛠 Tech Stack
+## Features
 
-| Layer | Tool |
-|-------|------|
-| Backend | **FastAPI** (Python, async) |
-| Database | **MongoDB** (Atlas) via Motor (async) and PyMongo (sync) |
-| LLM | **Llama-style** model via **Groq API** (currently `openai/gpt-oss-120b`) |
-| LLM pattern | **Tool Use / Function Calling** (OpenAI tool-call schema) |
-| Frontend | **Streamlit** + Plotly |
-| Hosting | Local dev / Railway-ready |
-
-The LLM provider is isolated in `ai/llm_client.py` — swappable with Claude, Gemini, or OpenAI by editing one file.
-
----
-
-## 🧠 AI Engineering Concepts Used
-
-This project is a working example of three modern LLM patterns:
-
-1. **Tool Use / Function Calling** (`POST /chat`)
-   The chatbot has 8 tools registered (read expenses, get totals, add/update/delete records). Llama autonomously picks tools, the backend executes them against MongoDB, and Llama writes the natural-language reply.
-
-2. **Structured Data Extraction** (`POST /expenses/natural`)
-   Free-form text → strict JSON `{title, amount, category}` via prompt engineering and JSON validation.
-
-3. **LLM-as-Classifier** (`POST /expenses/smart`)
-   Single-turn AI categorization with a constrained output vocabulary.
+| Feature | Description |
+|---|---|
+| Natural-language expense entry | Type a plain sentence; the AI extracts the title, amount, and category as structured data. |
+| Conversational AI assistant | Ask questions and issue commands in plain English. The assistant decides which database operations to run and replies in natural language. |
+| Bank-statement import | Upload a PDF bank or passbook statement; the AI extracts the transactions for you to review and confirm before saving. |
+| Monthly breakdown | Visual category-wise breakdown of the current month's spending. |
+| Yearly overview | Month-by-month and category-wise charts across the year. |
+| AI spending insights | A concise, plain-English summary of your spending patterns. |
+| AI budget advice | Personalized saving suggestions based on your actual data. |
+| Salary and savings tracking | Record monthly salary and automatically compute savings. |
 
 ---
 
-## 🏗 Architecture
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | FastAPI (async Python) |
+| Frontend | Streamlit + Plotly |
+| Database | MongoDB Atlas (Motor for async, PyMongo for sync) |
+| LLM | Groq API (Llama-family models) |
+| AI patterns | Tool use / function calling, structured extraction |
+
+The LLM provider is isolated in `ai/llm_client.py`, so it can be swapped for another provider by editing a single file.
+
+---
+
+## Architecture
 
 ```
-┌─────────────────┐
-│   Streamlit UI  │  http://localhost:8501
-└────────┬────────┘
-         │ HTTP (httpx)
-         ▼
-┌──────────────────────────────────┐
-│  FastAPI                         │  http://localhost:8000
-│  ├─ routes/expenses.py           │
-│  ├─ routes/salary.py             │
-│  └─ routes/ai.py                 │
-└────────┬─────────────────────────┘
-         │
-         ▼
-┌──────────────────────────────────┐
-│  ai/llm_client.py  (Groq API)    │
-│  ai/tools.py  (8 tools → Mongo)  │
-└────────┬─────────────────────────┘
-         │
-         ▼
-   MongoDB Atlas
+Streamlit UI  (http://localhost:8501)
+      |  HTTP
+      v
+FastAPI backend  (http://localhost:8000)
+   routes/  ->  expenses, salary, ai, settings, imports
+      |
+      v
+ai/llm_client.py  (Groq API)
+ai/tools.py       (database functions the assistant can call)
+      |
+      v
+MongoDB Atlas
 ```
 
 ---
 
-## 📦 API Endpoints
+## Requirements
 
-### Expenses
-- `POST /expenses` — Add expense (manual)
-- `POST /expenses/smart` — Add with AI-picked category
-- `POST /expenses/natural` — Add by parsing free-form sentence
-- `GET /expenses` — List current-month expenses
-- `PUT /expenses/{id}` — Update an expense
-- `DELETE /expenses/{id}` — Delete an expense
-- `GET /expenses/summary/monthly` — Category totals for this month
-- `GET /expenses/summary/yearly` — Month-by-month totals from January
-
-### Salary
-- `POST /salary` — Add to existing salary
-- `PUT /salary` — Replace salary value
-- `GET /salary` — Current month's salary
-- `GET /savings` — Savings = salary − expenses
-
-### AI
-- `GET /insights/monthly` — AI spending summary
-- `GET /advice` — AI budget tips
-- `POST /chat` — Conversational chatbot with tool use
+- Python 3.9 or higher
+- A MongoDB Atlas connection string (free tier works)
+- A Groq API key — free at [console.groq.com](https://console.groq.com)
 
 ---
 
-## 🚀 Run Locally
+## Setup
 
-### Prerequisites
-- Python 3.9+
-- MongoDB Atlas connection string
-- Groq API key (free at [console.groq.com](https://console.groq.com))
-
-### Setup
+**1. Clone the repository and install dependencies**
 
 ```bash
-# 1. Clone
 git clone https://github.com/Hiyaarora/ai-expense-tracker.git
 cd ai-expense-tracker
-
-# 2. Install
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+```
 
-# 3. Configure environment
-cat > .env <<EOF
-MONGO_URL=mongodb+srv://YOUR_MONGO_URL
-GROQ_API_KEY=gsk_YOUR_GROQ_KEY
+**2. Configure environment variables**
+
+Create a `.env` file in the project root:
+
+```env
+MONGO_URL=mongodb+srv://your-mongodb-connection-string
+GROQ_API_KEY=your-groq-api-key
 BACKEND_URL=http://localhost:8000
-EOF
+```
 
-# 4. Start the backend
+**3. Start the backend**
+
+```bash
 uvicorn main:app --reload
+```
 
-# 5. In a second terminal, start the frontend
+**4. Start the frontend** (in a second terminal)
+
+```bash
 source venv/bin/activate
 streamlit run frontend/app.py
 ```
 
-Open http://localhost:8501
+Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ---
 
-## 🗂 Project Structure
+## Project Structure
 
 ```
 ai-expense-tracker/
-├── main.py                    # FastAPI entry
-├── database.py                # MongoDB Motor client
-├── models.py                  # Pydantic request models
+├── main.py              # FastAPI entry point
+├── database.py          # MongoDB client
+├── models.py            # Pydantic request models
 ├── requirements.txt
-├── routes/
-│   ├── expenses.py            # CRUD + summary endpoints
-│   ├── salary.py              # Salary + savings
-│   └── ai.py                  # AI-powered endpoints
-├── ai/
-│   ├── llm_client.py          # Groq client (insights, advice, chat)
-│   ├── tools.py               # 8 tool functions for chatbot
-│   └── prompts.py             # System prompts
-└── frontend/
-    ├── app.py                 # Dashboard
-    ├── api_client.py          # HTTP helper
-    └── pages/
-        ├── 1_Monthly_Summary.py
-        ├── 2_Yearly_Summary.py
-        ├── 3_AI_Insights.py
-        └── 4_Chat.py
+├── routes/              # API endpoints (expenses, salary, ai, settings, imports)
+├── ai/                  # LLM client, tool functions, prompts, PDF parser
+└── frontend/            # Streamlit dashboard and pages
 ```
 
 ---
 
-## 📚 What I Learned Building This
+## Key Engineering Concepts
 
-- **LLM provider abstraction:** Designing `ai/llm_client.py` as the single swap point taught me how production AI apps stay vendor-flexible.
-- **Tool Use loop:** Implementing the multi-turn tool-call loop (call AI → AI requests tool → execute → return result → AI replies) is fundamental to every AI agent product.
-- **Structured output reliability:** Forcing a model to return strict JSON requires explicit prompting + parsing + validation — not just asking nicely.
-- **Sync vs async boundaries:** Used async MongoDB (Motor) for HTTP endpoints, sync PyMongo for the tool-call layer where the LLM SDK expects sync.
-
----
+- **Tool use / function calling** — the assistant is given a set of database functions, decides which to call to satisfy a request, and the backend executes them and returns the results for a final natural-language reply.
+- **Structured data extraction** — free-form text and PDF statements are converted into validated, structured records through careful prompting and parsing.
+- **Provider-agnostic design** — all LLM access is routed through a single client module, keeping the application independent of any one provider.
+- **Sync and async boundaries** — async MongoDB access for HTTP endpoints, with a synchronous path where the LLM tool-call layer requires it.
